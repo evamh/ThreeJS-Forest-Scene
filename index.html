@@ -1,0 +1,1379 @@
+<html>
+  <head>
+    <script>window.onerror = function(error, url, line) {parent.postMessage(["console", "❌ -- [ERROR] -- ❌ -- ⚠️ " + error], "*")};var cl = console.log;console.log = function () {var msg = [...arguments].join();parent.postMessage(["console", msg], "*");  }  </script><script>window.onerror = function(error, url, line) {parent.postMessage(["console", "❌ -- [ERROR] -- ❌ -- ⚠️ " + error], "*")};var cl = console.log;console.log = function () {var msg = [...arguments].join();parent.postMessage(["console", msg], "*");  } 
+</script><script crossorigin src = "https://cdnjs.cloudflare.com/ajax/libs/three.js/109/three.min.js">
+</script>
+    <script language="javascript" type="text/javascript">
+
+// This set of controls performs orbiting, dollying (zooming), and panning. It maintains
+// the "up" direction as +Y, unlike the TrackballControls. Touch on tablet and phones is
+// supported.
+//
+//    Orbit - left mouse / touch: one finger move
+//    Zoom - middle mouse, or mousewheel / touch: two finger spread or squish
+//    Pan - right mouse, or arrow keys / touch: three finter swipe
+//
+// This is a drop-in replacement for (most) TrackballControls used in examples.
+// That is, include this js file and wherever you see:
+//    	controls = new THREE.TrackballControls( camera );
+//      controls.target.z = 150;
+// Simple substitute "OrbitControls" and the control should work as-is.
+
+THREE.OrbitControls = function ( object, domElement, localElement ) {
+
+	this.object = object;
+	this.domElement = ( domElement !== undefined ) ? domElement : document;
+	this.localElement = ( localElement !== undefined ) ? localElement : document;
+
+	// API
+
+	// Set to false to disable this control
+	this.enabled = true;
+
+	// "target" sets the location of focus, where the control orbits around
+	// and where it pans with respect to.
+	this.target = new THREE.Vector3();
+	// center is old, deprecated; use "target" instead
+	this.center = this.target;
+
+	// This option actually enables dollying in and out; left as "zoom" for
+	// backwards compatibility
+	this.noZoom = false;
+	this.zoomSpeed = 1.0;
+	// Limits to how far you can dolly in and out
+	this.minDistance = 0;
+	this.maxDistance = Infinity;
+
+	// Set to true to disable this control
+	this.noRotate = false;
+	this.rotateSpeed = 1.0;
+
+	// Set to true to disable this control
+	this.noPan = false;
+	this.keyPanSpeed = 7.0;	// pixels moved per arrow key push
+
+	// Set to true to automatically rotate around the target
+	this.autoRotate = false;
+	this.autoRotateSpeed = 2.0; // 30 seconds per round when fps is 60
+
+	// How far you can orbit vertically, upper and lower limits.
+	// Range is 0 to Math.PI radians.
+	this.minPolarAngle = 0; // radians
+	this.maxPolarAngle = Math.PI; // radians
+
+	// Set to true to disable use of the keys
+	this.noKeys = false;
+	// The four arrow keys
+	this.keys = { LEFT: 37, UP: 38, RIGHT: 39, BOTTOM: 40 };
+
+	////////////
+	// internals
+
+	var scope = this;
+
+	var EPS = 0.000001;
+
+	var rotateStart = new THREE.Vector2();
+	var rotateEnd = new THREE.Vector2();
+	var rotateDelta = new THREE.Vector2();
+
+	var panStart = new THREE.Vector2();
+	var panEnd = new THREE.Vector2();
+	var panDelta = new THREE.Vector2();
+
+	var dollyStart = new THREE.Vector2();
+	var dollyEnd = new THREE.Vector2();
+	var dollyDelta = new THREE.Vector2();
+
+	var phiDelta = 0;
+	var thetaDelta = 0;
+	var scale = 1;
+	var pan = new THREE.Vector3();
+
+	var lastPosition = new THREE.Vector3();
+
+	var STATE = { NONE : -1, ROTATE : 0, DOLLY : 1, PAN : 2, TOUCH_ROTATE : 3, TOUCH_DOLLY : 4, TOUCH_PAN : 5 };
+	var state = STATE.NONE;
+
+	// events
+
+	var changeEvent = { type: 'change' };
+
+
+	this.rotateLeft = function ( angle ) {
+
+		if ( angle === undefined ) {
+
+			angle = getAutoRotationAngle();
+
+		}
+
+		thetaDelta -= angle;
+
+	};
+
+	this.rotateUp = function ( angle ) {
+
+		if ( angle === undefined ) {
+
+			angle = getAutoRotationAngle();
+
+		}
+
+		phiDelta -= angle;
+
+	};
+
+	// pass in distance in world space to move left
+	this.panLeft = function ( distance ) {
+
+		var panOffset = new THREE.Vector3();
+		var te = this.object.matrix.elements;
+		// get X column of matrix
+		panOffset.set( te[0], te[1], te[2] );
+		panOffset.multiplyScalar(-distance);
+		
+		pan.add( panOffset );
+
+	};
+
+	// pass in distance in world space to move up
+	this.panUp = function ( distance ) {
+
+		var panOffset = new THREE.Vector3();
+		var te = this.object.matrix.elements;
+		// get Y column of matrix
+		panOffset.set( te[4], te[5], te[6] );
+		panOffset.multiplyScalar(distance);
+		
+		pan.add( panOffset );
+	};
+	
+	// main entry point; pass in Vector2 of change desired in pixel space,
+	// right and down are positive
+	this.pan = function ( delta ) {
+
+		var element = scope.domElement === document ? scope.domElement.body : scope.domElement;
+
+		if ( scope.object.fov !== undefined ) {
+
+			// perspective
+			var position = scope.object.position;
+			var offset = position.clone().sub( scope.target );
+			var targetDistance = offset.length();
+
+			// half of the fov is center to top of screen
+			targetDistance *= Math.tan( (scope.object.fov/2) * Math.PI / 180.0 );
+			// we actually don't use screenWidth, since perspective camera is fixed to screen height
+			scope.panLeft( 2 * delta.x * targetDistance / element.clientHeight );
+			scope.panUp( 2 * delta.y * targetDistance / element.clientHeight );
+
+		} else if ( scope.object.top !== undefined ) {
+
+			// orthographic
+			scope.panLeft( delta.x * (scope.object.right - scope.object.left) / element.clientWidth );
+			scope.panUp( delta.y * (scope.object.top - scope.object.bottom) / element.clientHeight );
+
+		} else {
+
+			// camera neither orthographic or perspective - warn user
+			console.warn( 'WARNING: OrbitControls.js encountered an unknown camera type - pan disabled.' );
+parent.postMessage(["console",JSON.stringify('WARNING: OrbitControls.js encountered an unknown camera type - pan disabled.')], "*");
+
+		}
+
+	};
+
+	this.dollyIn = function ( dollyScale ) {
+
+		if ( dollyScale === undefined ) {
+
+			dollyScale = getZoomScale();
+
+		}
+
+		scale /= dollyScale;
+
+	};
+
+	this.dollyOut = function ( dollyScale ) {
+
+		if ( dollyScale === undefined ) {
+
+			dollyScale = getZoomScale();
+
+		}
+
+		scale *= dollyScale;
+
+	};
+
+	this.update = function () {
+
+		var position = this.object.position;
+		var offset = position.clone().sub( this.target );
+
+		// angle from z-axis around y-axis
+
+		var theta = Math.atan2( offset.x, offset.z );
+
+		// angle from y-axis
+
+		var phi = Math.atan2( Math.sqrt( offset.x * offset.x + offset.z * offset.z ), offset.y );
+
+		if ( this.autoRotate ) {
+
+			this.rotateLeft( getAutoRotationAngle() );
+
+		}
+
+		theta += thetaDelta;
+		phi += phiDelta;
+
+		// restrict phi to be between desired limits
+		phi = Math.max( this.minPolarAngle, Math.min( this.maxPolarAngle, phi ) );
+
+		// restrict phi to be betwee EPS and PI-EPS
+		phi = Math.max( EPS, Math.min( Math.PI - EPS, phi ) );
+
+		var radius = offset.length() * scale;
+
+		// restrict radius to be between desired limits
+		radius = Math.max( this.minDistance, Math.min( this.maxDistance, radius ) );
+		
+		// move target to panned location
+		this.target.add( pan );
+
+		offset.x = radius * Math.sin( phi ) * Math.sin( theta );
+		offset.y = radius * Math.cos( phi );
+		offset.z = radius * Math.sin( phi ) * Math.cos( theta );
+
+		position.copy( this.target ).add( offset );
+
+		this.object.lookAt( this.target );
+
+		thetaDelta = 0;
+		phiDelta = 0;
+		scale = 1;
+		pan.set(0,0,0);
+
+		if ( lastPosition.distanceTo( this.object.position ) > 0 ) {
+
+			this.dispatchEvent( changeEvent );
+
+			lastPosition.copy( this.object.position );
+
+		}
+
+	};
+
+
+	function getAutoRotationAngle() {
+
+		return 2 * Math.PI / 60 / 60 * scope.autoRotateSpeed;
+
+	}
+
+	function getZoomScale() {
+
+		return Math.pow( 0.95, scope.zoomSpeed );
+
+	}
+
+	function onMouseDown( event ) {
+
+		if ( scope.enabled === false ) { return; }
+		event.preventDefault();
+
+		if ( event.button === 0 ) {
+			if ( scope.noRotate === true ) { return; }
+
+			state = STATE.ROTATE;
+
+			rotateStart.set( event.clientX, event.clientY );
+
+		} else if ( event.button === 1 ) {
+			if ( scope.noZoom === true ) { return; }
+
+			state = STATE.DOLLY;
+
+			dollyStart.set( event.clientX, event.clientY );
+
+		} else if ( event.button === 2 ) {
+			if ( scope.noPan === true ) { return; }
+
+			state = STATE.PAN;
+
+			panStart.set( event.clientX, event.clientY );
+
+		}
+
+		// Greggman fix: https://github.com/greggman/three.js/commit/fde9f9917d6d8381f06bf22cdff766029d1761be
+		scope.domElement.addEventListener( 'mousemove', onMouseMove, false );
+		scope.domElement.addEventListener( 'mouseup', onMouseUp, false );
+
+	}
+
+	function onMouseMove( event ) {
+
+		if ( scope.enabled === false ) return;
+
+		event.preventDefault();
+
+		var element = scope.domElement === document ? scope.domElement.body : scope.domElement;
+
+		if ( state === STATE.ROTATE ) {
+
+			if ( scope.noRotate === true ) return;
+
+			rotateEnd.set( event.clientX, event.clientY );
+			rotateDelta.subVectors( rotateEnd, rotateStart );
+
+			// rotating across whole screen goes 360 degrees around
+			scope.rotateLeft( 2 * Math.PI * rotateDelta.x / element.clientWidth * scope.rotateSpeed );
+			// rotating up and down along whole screen attempts to go 360, but limited to 180
+			scope.rotateUp( 2 * Math.PI * rotateDelta.y / element.clientHeight * scope.rotateSpeed );
+
+			rotateStart.copy( rotateEnd );
+
+		} else if ( state === STATE.DOLLY ) {
+
+			if ( scope.noZoom === true ) return;
+
+			dollyEnd.set( event.clientX, event.clientY );
+			dollyDelta.subVectors( dollyEnd, dollyStart );
+
+			if ( dollyDelta.y > 0 ) {
+
+				scope.dollyIn();
+
+			} else {
+
+				scope.dollyOut();
+
+			}
+
+			dollyStart.copy( dollyEnd );
+
+		} else if ( state === STATE.PAN ) {
+
+			if ( scope.noPan === true ) return;
+
+			panEnd.set( event.clientX, event.clientY );
+			panDelta.subVectors( panEnd, panStart );
+			
+			scope.pan( panDelta );
+
+			panStart.copy( panEnd );
+
+		}
+
+		// Greggman fix: https://github.com/greggman/three.js/commit/fde9f9917d6d8381f06bf22cdff766029d1761be
+		scope.update();
+
+	}
+
+	function onMouseUp( /* event */ ) {
+
+		if ( scope.enabled === false ) return;
+
+		// Greggman fix: https://github.com/greggman/three.js/commit/fde9f9917d6d8381f06bf22cdff766029d1761be
+		scope.domElement.removeEventListener( 'mousemove', onMouseMove, false );
+		scope.domElement.removeEventListener( 'mouseup', onMouseUp, false );
+
+		state = STATE.NONE;
+
+	}
+
+	function onMouseWheel( event ) {
+
+		if ( scope.enabled === false || scope.noZoom === true ) return;
+
+		var delta = 0;
+
+		if ( event.wheelDelta ) { // WebKit / Opera / Explorer 9
+
+			delta = event.wheelDelta;
+
+		} else if ( event.detail ) { // Firefox
+
+			delta = - event.detail;
+
+		}
+
+		if ( delta > 0 ) {
+
+			scope.dollyOut();
+
+		} else {
+
+			scope.dollyIn();
+
+		}
+
+	}
+
+	function onKeyDown( event ) {
+
+		if ( scope.enabled === false ) { return; }
+		if ( scope.noKeys === true ) { return; }
+		if ( scope.noPan === true ) { return; }
+
+		// pan a pixel - I guess for precise positioning?
+		// Greggman fix: https://github.com/greggman/three.js/commit/fde9f9917d6d8381f06bf22cdff766029d1761be
+		var needUpdate = false;
+		
+		switch ( event.keyCode ) {
+
+			case scope.keys.UP:
+				scope.pan( new THREE.Vector2( 0, scope.keyPanSpeed ) );
+				needUpdate = true;
+				break;
+			case scope.keys.BOTTOM:
+				scope.pan( new THREE.Vector2( 0, -scope.keyPanSpeed ) );
+				needUpdate = true;
+				break;
+			case scope.keys.LEFT:
+				scope.pan( new THREE.Vector2( scope.keyPanSpeed, 0 ) );
+				needUpdate = true;
+				break;
+			case scope.keys.RIGHT:
+				scope.pan( new THREE.Vector2( -scope.keyPanSpeed, 0 ) );
+				needUpdate = true;
+				break;
+		}
+
+		// Greggman fix: https://github.com/greggman/three.js/commit/fde9f9917d6d8381f06bf22cdff766029d1761be
+		if ( needUpdate ) {
+
+			scope.update();
+
+		}
+
+	}
+	
+	function touchstart( event ) {
+
+		if ( scope.enabled === false ) { return; }
+
+		switch ( event.touches.length ) {
+
+			case 1:	// one-fingered touch: rotate
+				if ( scope.noRotate === true ) { return; }
+
+				state = STATE.TOUCH_ROTATE;
+
+				rotateStart.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
+				break;
+
+			case 2:	// two-fingered touch: dolly
+				if ( scope.noZoom === true ) { return; }
+
+				state = STATE.TOUCH_DOLLY;
+
+				var dx = event.touches[ 0 ].pageX - event.touches[ 1 ].pageX;
+				var dy = event.touches[ 0 ].pageY - event.touches[ 1 ].pageY;
+				var distance = Math.sqrt( dx * dx + dy * dy );
+				dollyStart.set( 0, distance );
+				break;
+
+			case 3: // three-fingered touch: pan
+				if ( scope.noPan === true ) { return; }
+
+				state = STATE.TOUCH_PAN;
+
+				panStart.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
+				break;
+
+			default:
+				state = STATE.NONE;
+
+		}
+	}
+
+	function touchmove( event ) {
+
+		if ( scope.enabled === false ) { return; }
+
+		event.preventDefault();
+		event.stopPropagation();
+
+		var element = scope.domElement === document ? scope.domElement.body : scope.domElement;
+
+		switch ( event.touches.length ) {
+
+			case 1: // one-fingered touch: rotate
+				if ( scope.noRotate === true ) { return; }
+				if ( state !== STATE.TOUCH_ROTATE ) { return; }
+
+				rotateEnd.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
+				rotateDelta.subVectors( rotateEnd, rotateStart );
+
+				// rotating across whole screen goes 360 degrees around
+				scope.rotateLeft( 2 * Math.PI * rotateDelta.x / element.clientWidth * scope.rotateSpeed );
+				// rotating up and down along whole screen attempts to go 360, but limited to 180
+				scope.rotateUp( 2 * Math.PI * rotateDelta.y / element.clientHeight * scope.rotateSpeed );
+
+				rotateStart.copy( rotateEnd );
+				break;
+
+			case 2: // two-fingered touch: dolly
+				if ( scope.noZoom === true ) { return; }
+				if ( state !== STATE.TOUCH_DOLLY ) { return; }
+
+				var dx = event.touches[ 0 ].pageX - event.touches[ 1 ].pageX;
+				var dy = event.touches[ 0 ].pageY - event.touches[ 1 ].pageY;
+				var distance = Math.sqrt( dx * dx + dy * dy );
+
+				dollyEnd.set( 0, distance );
+				dollyDelta.subVectors( dollyEnd, dollyStart );
+
+				if ( dollyDelta.y > 0 ) {
+
+					scope.dollyOut();
+
+				} else {
+
+					scope.dollyIn();
+
+				}
+
+				dollyStart.copy( dollyEnd );
+				break;
+
+			case 3: // three-fingered touch: pan
+				if ( scope.noPan === true ) { return; }
+				if ( state !== STATE.TOUCH_PAN ) { return; }
+
+				panEnd.set( event.touches[ 0 ].pageX, event.touches[ 0 ].pageY );
+				panDelta.subVectors( panEnd, panStart );
+				
+				scope.pan( panDelta );
+
+				panStart.copy( panEnd );
+				break;
+
+			default:
+				state = STATE.NONE;
+
+		}
+
+	}
+
+	function touchend( /* event */ ) {
+
+		if ( scope.enabled === false ) { return; }
+
+		state = STATE.NONE;
+	}
+
+	this.domElement.addEventListener( 'contextmenu', function ( event ) { event.preventDefault(); }, false );
+	this.localElement.addEventListener( 'mousedown', onMouseDown, false );
+	this.domElement.addEventListener( 'mousewheel', onMouseWheel, false );
+	this.domElement.addEventListener( 'DOMMouseScroll', onMouseWheel, false ); // firefox
+
+	this.domElement.addEventListener( 'keydown', onKeyDown, false );
+
+	this.localElement.addEventListener( 'touchstart', touchstart, false );
+	this.domElement.addEventListener( 'touchend', touchend, false );
+	this.domElement.addEventListener( 'touchmove', touchmove, false );
+
+};
+
+THREE.OrbitControls.prototype = Object.create( THREE.EventDispatcher.prototype );
+</script>
+    
+    // scripts for individual objects 
+    <script language="javascript" type="text/javascript">
+class Sun extends THREE.Group {
+  
+  constructor(radius, texture) {
+   	super();
+
+    this.size = radius;
+    this.texture = texture;
+
+    this.initMesh();   
+    this.initLight();
+  }
+  
+  initMesh() {
+    var geometry = new THREE.SphereGeometry(this.radius, 50, 50);
+	var material = new THREE.MeshPhongMaterial({map: this.texture, side: THREE.DoubleSide});
+    this.mesh = new THREE.Mesh(geometry, material);
+    this.add(this.mesh);
+  }
+  
+  initLight() {
+    this.sunlight = new THREE.DirectionalLight(0xffffff, 1); 
+    this.sunlight.castShadow = true;
+    this.add(this.sunlight);
+  }
+
+  // Set sun around pivot for rotation
+  setPivot(x, y, z) {
+    this.mesh.position.set(x, y, z);
+  } 
+ 
+  // Animate by rotating around the y axis 
+  animate() {
+    this.rotation.y += 0.001;
+  }
+
+}
+
+</script>
+    <script language="javascript" type="text/javascript">
+class SkyFrame extends THREE.Group {
+
+  constructor(radius,  width, height, depth, skyTexture, grassTexture, skyColor) {
+    super();
+    
+    this.radius = radius;
+    this.width = width;
+    this.height = height;
+    this.depth = depth;
+    this.skyTexture = skyTexture;
+    this.grassTexture = grassTexture;
+    this.skyColor = skyColor;
+    
+    this.initSkyMesh();
+    this.initGroundMesh();
+    this.groundMesh.position.set(0, -this.height * 0.5, 0);
+  }
+  
+  initSkyMesh() {
+    
+    var geometry = new THREE.SphereGeometry(this.radius, 50, 50);
+    var material = new THREE.MeshBasicMaterial({map: this.skyTexture, side: THREE.BackSide, color: this.skyColor});
+    this.skyMesh = new THREE.Mesh(geometry, material);
+    this.add(this.skyMesh);
+  }
+  
+  initGroundMesh() {
+    var geometry = new THREE.BoxGeometry(this.width, this.height, this.depth);
+    var material = new THREE.MeshBasicMaterial({map: this.grassTexture, color: "#72AB75", side: THREE.DoubleSide});
+    this.groundMesh = new THREE.Mesh(geometry, material);
+    this.groundMesh.receiveShadow = true;
+    this.add(this.groundMesh);
+  }
+  
+  // Set material color of sky 
+  setSkyColor(color) {
+    this.children[0].material.color.set(color);
+  }
+
+}
+
+</script>
+    <script language="javascript" type="text/javascript">
+class Tree extends THREE.Group {
+  
+  constructor(radius, pineTexture, barkTexture) {
+    super();
+    
+    this.radius = radius;
+    this.pineTexture = pineTexture;
+    this.barkTexture = barkTexture;
+
+    this.castShadow = true;
+    this.initMesh();
+  }
+  
+  initMesh() {
+    var pineMaterial = new THREE.MeshBasicMaterial({map: this.pineTexture});
+    var barkMaterial = new THREE.MeshBasicMaterial({map: this.barkTexture});
+    
+    var height = Math.min(1.5, Math.random() * 10);
+    
+    // Create cones
+    for(var numCones = 0; numCones < 5; numCones++) {
+      var cone = new THREE.Mesh(new THREE.ConeGeometry(this.radius, height), pineMaterial);
+      cone.position.y = numCones * height * 0.6; // stack cones on top of each other 
+      this.add(cone);
+    }
+    
+    // Create bark
+    var barkRadius = this.radius * 0.2;
+    var bark = new THREE.Mesh( 
+      new THREE.CylinderGeometry(barkRadius, barkRadius, height),  	
+      barkMaterial
+    );
+        
+    bark.position.y = -height;
+    this.position.y = height * 1.5; 
+    this.add(bark);
+   
+  }
+  
+}
+
+</script>
+    <script language="javascript" type="text/javascript">
+class Rock extends THREE.Group {
+	
+  constructor(radius, texture) {
+    super();
+    
+    this.radius = radius;
+    this.texture = texture;
+    
+    this.initMesh();
+    this.castShadow = true;
+  }
+  
+  initMesh() {
+    var rockMaterial = new THREE.MeshBasicMaterial({map: this.texture});
+            
+    this.rockMesh1 = new THREE.Mesh(new THREE.SphereGeometry(this.radius), rockMaterial);
+    this.rockMesh2 = new THREE.Mesh(new THREE.SphereGeometry(this.radius * 0.4), rockMaterial);
+    this.rockMesh3 = new THREE.Mesh(new THREE.SphereGeometry(this.radius * 0.6), rockMaterial);
+        
+    this.rockMesh2.position.set(-this.radius * 0.6, this.radius * 0.7, 0);    
+    this.rockMesh3.position.set(this.radius * 0.7, this.radius * 0.1, 0);
+    this.add(this.rockMesh1, this.rockMesh2, this.rockMesh3);
+  }
+  
+}
+</script>
+    <script language="javascript" type="text/javascript">
+class Pond extends THREE.Group {
+  constructor(radius, texture) {
+    super();
+    
+    this.radius = radius;
+    this.texture = texture;
+    
+    this.initMesh();
+	this.position.y = -0.1;
+  }
+  
+  initMesh() {
+    var pondMaterial = new THREE.MeshPhongMaterial({map: pondTexture, color: "#006A99"});
+    this.pondMesh1 = new THREE.Mesh(	
+      new THREE.CylinderGeometry(this.radius, this.radius, 0.25, 50),    
+      pondMaterial
+    );
+    
+    this.pondMesh2 = new THREE.Mesh(    
+      new THREE.CylinderGeometry(this.radius * 0.8, this.radius * 0.8, 0.25, 50),    
+      pondMaterial   
+    );
+    this.pondMesh3 = new THREE.Mesh(   
+      new THREE.CylinderGeometry(this.radius * 0.6, this.radius * 0.6, 0.25, 50),
+      pondMaterial
+    );
+    
+    this.pondMesh2.position.x = this.radius;
+    this.pondMesh3.position.x = -this.radius * 0.6; 
+    this.pondMesh3.position.z = this.radius;
+
+    this.add(this.pondMesh1, this.pondMesh2, this.pondMesh3);
+
+  }
+  
+}
+</script>
+    <script language="javascript" type="text/javascript">
+class Bench extends THREE.Group {
+  
+  constructor(width, height, texture) {
+    super();
+    
+    this.width = width;
+    this.height = height;
+    this.texture = texture;
+    
+    this.initMesh();
+    this.castShadow = true;
+  }
+  
+  initMesh() {
+    var benchSeatHeight = this.height * 0.2;
+    var benchSeatDepth = this.width * 0.4;
+    var benchMaterial = new THREE.MeshPhongMaterial({map: this.texture});
+    this.benchSeatMesh = new THREE.Mesh(  
+      new THREE.BoxGeometry(this.width, benchSeatHeight, benchSeatDepth),   
+      benchMaterial
+    );
+        
+    this.add(this.benchSeatMesh);
+
+    // Bench legs 
+    for(var i=0; i<4; i++) {
+          
+      var multiplier = Math.pow(-1, i);
+      var legWidth = this.width * 0.1;
+      var legDepth = this.width * 0.1;    
+      var depthMultiplier = 1;
+      if(i >= 2) depthMultiplier = -1;
+      var benchLeg = new THREE.Mesh(     
+        new THREE.BoxGeometry(legWidth, this.height, legDepth),
+        benchMaterial
+      );
+
+      benchLeg.position.x = multiplier * (this.width - legWidth)* 0.5;
+      benchLeg.position.y =  -(benchSeatHeight + this.height )* 0.5;
+      benchLeg.position.z =  depthMultiplier * (benchSeatDepth - legDepth) * 0.5;
+      this.add(benchLeg);
+    }
+  }
+  
+}
+</script>
+    <script language="javascript" type="text/javascript">
+class Cloud extends THREE.Group {
+  
+  constructor(radius, texture, color) {
+    super();
+    
+    this.radius = radius;
+    this.texture = texture;
+    this.color = color;
+    
+    this.initMesh();
+    this.castShadow = true;
+  }
+  
+  initMesh() {
+    var cloudMaterial = new THREE.MeshBasicMaterial({map: this.texture, color: this.color});  
+    var cloudGeom = new THREE.SphereGeometry(this.radius, 50, 50);
+    var positionMultipliers = [    
+      [0, 0, 0],  
+      [-1, 0.3, 0],     
+      [0.3, 1, 0],   
+      [1.1, 0.2, 0]
+    ];
+    
+    for(var i=0; i<4; i++) {
+      var mesh = new THREE.Mesh(cloudGeom, cloudMaterial);
+      var multipliers = positionMultipliers[i];
+      mesh.position.set(this.radius * multipliers[0], this.radius * multipliers[1], this.radius * multipliers[2]);
+      this.add(mesh);     
+    }
+  }
+  
+  // Animate by moving across the screen, resetting if the cloud moves past the skybox
+  animate(lower, upper, speed) {
+    this.position.x += speed;
+    
+    if(this.position.x > upper) { 
+      this.position.x = lower;   
+    }  
+  }
+  
+  // Set material color of cloud 
+  setCloudColor(color) {
+    for(var i=0; i<this.children.length; i++) {    
+      this.children[i].material.color.set(color);
+    }
+  }
+    
+}
+</script>
+    <script language="javascript" type="text/javascript">
+class LampPost extends THREE.Group {
+  
+  constructor(radius, height) {
+    super();
+    
+    this.radius = radius;
+    this.height = height;
+    
+    this.initMesh();
+  }
+  
+  initMesh() {
+    
+    var lampMaterial = new THREE.MeshPhongMaterial({color: "#5A5A5A", shininess: 100, side: THREE.DoubleSide});
+    var clearLampMaterial = new THREE.MeshPhongMaterial({color: 0xffffff, opacity: 0.3, transparent: true, side: THREE.DoubleSide});
+    var standGeom = new THREE.CylinderGeometry(this.radius * 0.3, this.radius, this.height * 0.15, 30, 1);
+    var standMesh = new THREE.Mesh(standGeom, lampMaterial);
+    this.add(standMesh);
+    
+    var standGeom2 = new THREE.CylinderGeometry(this.radius * 0.3, this.radius * 0.3, this.height, 30, 1);
+    var standMesh2 = new THREE.Mesh(standGeom2, lampMaterial);
+    standMesh2.position.y = this.height * 0.5;
+    this.add(standMesh2);
+    
+    var topGeom1 = new THREE.CylinderGeometry(this.radius * 0.4, this.radius * 0.3, this.height * 0.15, 30, 1, true);
+    var topMesh1 = new THREE.Mesh(topGeom1, clearLampMaterial);
+    topMesh1.position.y = this.height * 1.07;
+    this.add(topMesh1); 
+    
+    var topGeom2 = new THREE.CylinderGeometry(this.radius * 0.2, this.radius * 0.7, this.height * 0.15);
+    var topMesh2 = new THREE.Mesh(topGeom2, lampMaterial);
+    topMesh2.position.y = this.height * 1.14;
+    this.add(topMesh2);
+    
+    this.position.y = this.height * 0.07;
+  }
+  
+}
+</script>    
+    <script language="javascript" type="text/javascript">
+class Rain extends THREE.Points {
+  
+  constructor(x, y, z) {
+    super();
+    
+    this.x = x;
+    this.y = y;
+    this.z = z;
+    
+    this.numRainDrops = 2000;
+    this.arrayCount = this.numRainDrops * 3;
+    this.initRain();
+  }
+  
+  // Initialize the rain by creating a Float32Array() of random x, y, z points
+  // Add that array as the position attribute of the points geometry
+  initRain() {
+    
+    var rainGeometry = new THREE.BufferGeometry();
+    var vertices = new Float32Array(this.arrayCount);
+    
+    for(var i=0; i < this.numRainDrops; i++) {
+      
+      var index = i * 3;
+      vertices[i] = Math.random() * this.x - (this.x * 0.5);
+      vertices[i+1] = Math.random() * this.y;
+      vertices[i+2] = Math.random() * this.z - (this.z * 0.5);
+    
+    };
+      
+    rainGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(vertices, 3)
+    );
+    
+    var rainMaterial = new THREE.PointsMaterial({color: "#9D9D9D", size: 0.1, opacity: 0.2});
+    
+    this.geometry = rainGeometry;
+    this.material = rainMaterial;
+  }
+  
+  // Animate rain by decreasing the y position of the vertices
+  animate(upperBound, lowerBound) {
+      
+  	for(var i=0; i<this.numRainDrops; i++) {
+      var yCoordinate = i * 3 + 1;
+      this.geometry.attributes.position.array[yCoordinate] -= 0.1;
+      
+      if(this.geometry.attributes.position.array[yCoordinate] < lowerBound) {
+        this.geometry.attributes.position.array[yCoordinate] = upperBound;
+      }
+    }
+    
+    this.geometry.attributes.position.needsUpdate = true;
+  }
+  
+  // Toggle rain on and off
+  toggle(state) {
+    
+    if(state) {
+      this.initRain();
+    } else {
+      this.geometry.attributes.position.array = new Float32Array();
+    }
+    
+  }
+  
+}
+</script>
+    <script language="javascript" type="text/javascript">
+class Lightning extends THREE.Group {
+  
+  constructor(x, z, minY) {
+    super();
+    
+    this.x = x;
+    this.z = z;
+    this.minY = minY;
+    
+    this.initLightning();
+  }
+  
+  initLightning() {
+    
+    var points = [];
+        
+    points.push(new THREE.Vector3(this.x, this.minY * 1.3, this.z));
+    points.push(new THREE.Vector3(this.x * 1.1, this.minY * 1.2, this.z));
+    points.push(new THREE.Vector3(this.x * 0.9, this.minY * 1.1, this.z));
+    points.push(new THREE.Vector3(this.x * 1.2, this.minY * 1, this.z));
+    
+    var geometry = new THREE.BufferGeometry().setFromPoints(points);
+    var material = new THREE.LineBasicMaterial({color: "#FFFFFF", linewidth: 2});
+    
+    var lightning = new THREE.Line(geometry, material);
+    
+    this.add(lightning);
+  }
+
+}
+</script>
+
+	<meta charset="utf-8">
+	<style>
+		body {
+			margin: 0px;
+			background-color: #000000;
+			overflow: hidden;
+		}
+	</style>
+  </head>
+  <body>
+	<script>
+
+      // mouse variables
+      var mouseX = 0;
+      var mouseY = 0;
+      var normalizedX = 0;
+      var normalizedY = 0;
+      var mouseState = "sunny";
+      
+      // instantialize objects 
+      var camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 1, 1000);   
+      var scene = new THREE.Scene();
+      var myTextureLoader = new THREE.TextureLoader();
+      var renderer = new THREE.WebGLRenderer();
+      var controls = new THREE.OrbitControls (camera, renderer.domElement);
+
+      // textures
+      const skyTexture = myTextureLoader.load('sky2.jpeg');
+      const grassTexture = myTextureLoader.load('grass.jpeg');
+      const barkTexture = myTextureLoader.load('bark.jpeg');
+      const pineTexture = myTextureLoader.load('pine.jpeg');
+      const pondTexture = myTextureLoader.load('pond.jpeg');
+      const rockTexture = myTextureLoader.load('rock.jpeg');
+      const benchTexture = myTextureLoader.load('bench.jpeg');
+      const sunTexture = myTextureLoader.load('sun.jpeg');
+      const cloudTexture = myTextureLoader.load('cloud.jpeg');
+      
+      // setup 
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement); 
+      window.addEventListener('resize', onWindowResize, false); 
+      window.addEventListener('mousemove', getMouse, false);
+      window.addEventListener('dblclick', mouseDoubleClick, false);
+      window.addEventListener('mousedown', mouseClick, false);
+      
+      // shadows
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+          
+      camera.position.set(0, 2, 6); 
+
+      // Parameters
+      var skyboxParams = {
+        width: 30, 
+        depth: 30,
+        groundHeight: 0.1, 
+        radius: 20
+      }
+      
+      var rainySkyColor = "#808080";
+      var sunnySkyColor = "#93C9FF";
+      var fogColor = "0x262837";
+
+      var pondParams = {
+        radius1: 3,
+        radius2: 4
+      }
+      
+      var sunParams = {
+        radius: 2,
+        intensity: 1
+      }    
+      
+      var totalNumClouds = 10;
+      var cloudArray = []; // push to array in order to animate afterwards
+      var rainyCloudColor = "#555454";
+      var sunnyCloudColor = "#DFDBDB";
+
+      var benchParams = {
+        width: 2,
+        height: 0.7
+      }
+      
+      // timer
+      var timer = new THREE.Clock();
+      
+      // for lightning bolts
+      var bolts = [];
+ 
+      // returns a spotlight object with the target set 
+      function spotLight(x, y, z) {
+        
+        var spotlight = new THREE.SpotLight("#FFFFFF", 0.5, 20, Math.atan(4/8));
+    	spotlight.castShadow = true;
+    	spotlight.target = new THREE.Object3D();
+    	spotlight.target.position.set(x, y, z);
+        spotlight.target.updateMatrixWorld();
+        
+        return spotlight;
+      }
+      
+      // Wrapper function which creates main scene objects + lights 
+      function createMainScene() {
+        
+        var ambientLight = new THREE.AmbientLight("rgb(255,255,255)");
+        scene.add(ambientLight);
+        
+        // Variable to store distance off the ground
+        var distOffGround = skyboxParams.groundHeight * 0.5;
+        
+        // TREES
+        // Create trees of random size and placed randomly in a circle around the pond 
+        for(var numTrees = 0; numTrees < 50; numTrees++) {
+          var angle = Math.random() * Math.PI * 2; 
+          var treeRadius = Math.random() * 10 + (pondParams.radius1 + pondParams.radius2);
+          var x = Math.sin(angle) * treeRadius; 
+          var z = Math.cos(angle) * treeRadius;
+
+          var tree = new Tree(
+            Math.min(1.5, Math.random() * 10), 
+            pineTexture, 
+            barkTexture
+          );
+          tree.position.set(x, tree.position.y, z);
+          scene.add(tree);
+        }
+        
+        // ROCKS
+        var rock1 = new Rock(1, rockTexture); 
+        rock1.position.set(-pondParams.radius1 * 1.1, 0, 0);
+        scene.add(rock1);
+        
+        var rock2 = new Rock(2, rockTexture);
+        rock2.position.set(pondParams.radius1+pondParams.radius2, 0, 2);
+        scene.add(rock2);
+              
+        // POND
+        var pond = new Pond(pondParams.radius1, pondTexture);
+        scene.add(pond);
+               
+        // BENCHS
+        var bench = new Bench(benchParams.width, benchParams.height, benchTexture);
+        bench.position.set(0, 0.8, -4);
+        scene.add(bench);
+        
+        var bench2 = new Bench(benchParams.width, benchParams.height, benchTexture);
+        bench2.position.set(2, 0.8, 4);
+        bench2.rotation.y = 0.5;
+        scene.add(bench2);
+        
+        // LAMP POSTS 
+        var lampPost1 = new LampPost(0.5, 3.5);
+        lampPost1.position.set(bench.position.x - 2, 0.2, bench.position.z);
+        scene.add(lampPost1);
+        
+        var lampPost2 = lampPost1.clone();
+        lampPost2.position.set(bench2.position.x + 2, 0.2, bench2.position.z - 1);
+        scene.add(lampPost2);
+      }
+              
+      /* Define animated objects and objects which will change between scenes 
+      	 outside of createMainScene() function so that they can be accessed
+         in draw() function 
+      */
+      // SKY FRAME
+      var skyFrame = new SkyFrame(  
+        skyboxParams.radius, 
+        skyboxParams.width, 
+        skyboxParams.groundHeight, 
+        skyboxParams.depth,  
+        skyTexture,
+        grassTexture,
+        sunnySkyColor
+      );
+        
+      scene.add(skyFrame);
+      
+      // SUN
+      var sun = new Sun(sunParams.radius, sunTexture);
+      sun.setPivot(skyboxParams.width * 0.5, skyboxParams.radius * 0.6, 0);
+      scene.add(sun);
+      
+      // CLOUDS
+      addClouds();
+      
+      // SPOT LIGHTS
+      var spotLight1 = spotLight(-2, 0, -4);
+      spotLight1.position.set(-5, 4, -4);
+      scene.add(spotLight1);
+      
+      var spotLight2 = spotLight(2, 0, 4);
+      spotLight2.position.set(2, 4, 4);
+      scene.add(spotLight2);
+      
+      // Spotlights are initially invisible as it's sunny
+      spotLight1.visible = false;
+      spotLight2.visible = false;
+      
+      // RAIN
+      var rain = new Rain(skyboxParams.width, skyboxParams.radius * 0.6, skyboxParams.depth);
+      scene.add(rain);
+      rain.toggle(false); // remove initially in sunny scene
+      
+      // Main drawing code is in here - only render it once 
+      createMainScene();
+      
+      function draw() {
+
+        // Get elapsed time
+        var time = timer.getElapsedTime();
+        
+        // Clear bolts after 2 seconds
+        if(Math.floor(time) % 2 == 0) {
+          clearLightningBolts();
+        }
+        
+        sun.animate();
+        
+        // Animate each cloud
+        // Lower and upper bound is the skybox radius
+        for(var cloudIndex = 0; cloudIndex < cloudArray.length; cloudIndex++) {
+          var speed = Math.random() * 0.01;
+          cloudArray[cloudIndex].animate(-skyboxParams.radius * 0.7, skyboxParams.radius * 0.7, speed);
+        }
+        
+        // Animate rain
+        rain.animate(skyboxParams.radius * 0.6, skyboxParams.groundHeight);
+        
+        controls.update();
+        renderer.render(scene, camera);
+        requestAnimationFrame(draw);
+      }
+      
+      // Helper function to add clouds
+      function addClouds(color) {
+        for(var numClouds = 0; numClouds < totalNumClouds; numClouds++) {
+          var cloudAngle = Math.random() * Math.PI * 2; 
+          var cloudRadius = skyboxParams.radius * Math.random() * 0.6;
+          var cloud = new Cloud(Math.random(), cloudTexture, color); 	
+          cloud.position.set(Math.sin(cloudAngle) * cloudRadius, skyboxParams.radius * 0.6, Math.cos(cloudAngle) * cloudRadius);
+          cloudArray.push(cloud);
+          scene.add(cloud);
+        }
+      }
+            
+      // Helper function to change scene to rainy 
+      function changeToRain() {
+
+        // Change color of sky to gray
+        skyFrame.setSkyColor(rainySkyColor);
+        
+        // Remove sun
+        sun.visible = false;  
+
+        // Change color of clouds to dark gray
+        totalNumClouds = 100;
+        for(var i=0; i<cloudArray.length; i++) {
+          cloudArray[i].setCloudColor(rainyCloudColor);
+        }
+        
+        // Add more clouds
+        addClouds(rainyCloudColor);
+        
+        // Switch on spotlights
+        spotLight1.visible = true;
+        spotLight2.visible = true;
+        
+        // Toggle rain on
+        rain.toggle(true);
+        
+      }
+      
+      // Helper function to change scene to sunny
+      function changeToSun() {
+        
+        // Add sun
+        sun.visible = true;
+        
+        // Change color of sky to original
+        skyFrame.setSkyColor(sunnySkyColor);
+        
+        // Change cloud color
+        for(var i=0; i<cloudArray.length; i++) { 
+          cloudArray[i].setCloudColor(sunnyCloudColor);
+        }
+        
+        // Delete extra clouds
+        totalNumClouds = 10;
+        for(var j = totalNumClouds; j < cloudArray.length; j++) {
+          cloudArray[j].visible = false;
+        }
+        
+        // Switch off spotlights
+        spotLight1.visible = false;
+        spotLight2.visible = false;
+        
+        // Toggle rain off
+        rain.toggle(false);
+
+      }
+      
+      // Create a lightning bolt 
+      function createLightningBolt(boltX, boltY) {
+        var bolt = new Lightning(boltX, boltY, skyboxParams.radius * 0.3);
+        bolts.push(bolt);
+        scene.add(bolt);  
+      }
+      
+      // Remove all lightning bolts 
+      function clearLightningBolts() {
+        for(var i=0; i< bolts.length; i++) {
+          scene.remove(bolts[i]);
+        }
+        bolts = [];
+      }
+
+      // Event listener function 
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }  
+
+      // Event listener function 
+      function getMouse(mousePosition) {   
+        mouseX = mousePosition.layerX; 
+        mouseY = mousePosition.layerY;
+        normalizedX = mouseX / window.innerWidth;
+        normalizedY = mouseY / window.innerHeight;
+      }
+      
+      // Event listener function
+      // Adds lightning if it's in a rainy state 
+      function mouseClick() {
+        
+        // get coordinates in Three.js space 
+        var boltX = (event.clientX / window.innerWidth * 2 - 1) * 10;
+        var boltY = -10 * (event.clientY / window.innerHeight * 2 - 1);
+
+        // Only when rainy
+        if(mouseState == "rainy") {
+          createLightningBolt(boltX, boltY);
+        } 
+      }
+      
+      // Event listener function
+      // Change the scene when user double clicks the mouse 
+      function mouseDoubleClick() {
+        mouseState = (mouseState == "sunny") ? "rainy" : "sunny";
+        if(mouseState == "rainy") {
+          changeToRain()
+        } else {
+          changeToSun();
+        }
+      }
+	
+      requestAnimationFrame(draw);
+      
+
+</script>
+  </body>
+</html>
