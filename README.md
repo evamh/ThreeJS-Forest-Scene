@@ -1,10 +1,8 @@
-# Coding-One-Final-Project
-Repository for the coding one final project
+# Three.js Interactive Woodland scene 
 
 **MIMIC link:** https://mimicproject.com/code/e9298342-2ed7-7899-e402-b8180d359d1d
 
-
-For my final project, I extended my homework from session 7 and created an interactive Three.js woodland scene. The majority of the objects are built using THREE.Groups, with each object defined in a separate class and instances of each created in the main scene script.
+The majority of the objects are built using THREE.Groups, with each object defined in a separate class and instances of each created in the main scene script.
 
 The scene is comprised of a few static objects. Each object is composed of multiple geometries grouped together and use various textures to render them more realistic. A few of the objects are animated. For instance, the sun (in the sunny scene) rotates around the skybox, using a pivot to rotate around the y-axis. The clouds move along the x-axis, resetting to the left of the skybox once they pass through the right side. Finally, the raindrops move down the y-axis, resetting to the cloud position once they reach the ground. Each of the animated objects call their own animate() function defined in their class. 
 
@@ -17,3 +15,8 @@ In the rainy scene, if a user clicks anywhere on the scene, a lightning bolt wil
 One of the main characteristics of the rainy scene is the use of rainfall. A separate class Rain() was created which extends the THREE.Points class, and uses a Float32Array() of x, y and z points to model individual raindrops. These coordinates are randomly generated and span the skybox. When the scene goes back to sunny, the rain is toggled off through use of a helper function. 
 
 Finally, there are a few sources of lights in the scene, which change depending on if it’s a sunny or rainy scene. Ambient light is constant throughout. In the sunny scene, the sun emits a directional light targeted on the pond and moves with the sun. In the rainy scene, two spotlights are placed in the lamp posts and are toggled on, generating a glow on the two benches. These are toggled off again when sunny. 
+
+<img width="1221" alt="pic1" src="https://github.com/evamh/ThreeJS-Forest-Scene/assets/12279913/b90520cc-a1f5-4849-829d-ab91a5d3afff">
+
+<img width="1215" alt="pic2" src="https://github.com/evamh/ThreeJS-Forest-Scene/assets/12279913/900e13f8-cc50-445d-8d16-9f9cf5153463">
+
